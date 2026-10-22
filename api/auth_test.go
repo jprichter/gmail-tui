@@ -166,7 +166,7 @@ func TestGetAuthenticatedClientUsesSavedToken(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "http://127.0.0.1",
-		Endpoint: oauth2.Endpoint{
+		Endpoint: oauth2.Endpoint{ // #nosec G101 -- Public dummy OAuth URLs, not credentials; these tests never exchange a code.
 			AuthURL:  "https://example.com/auth",
 			TokenURL: "https://example.com/token",
 		},
@@ -305,7 +305,7 @@ func TestPerformLoopbackFlow(t *testing.T) {
 func TestPerformLoopbackFlowRejectsBadState(t *testing.T) {
 	cfg := &oauth2.Config{
 		ClientID: "client-id",
-		Endpoint: oauth2.Endpoint{
+		Endpoint: oauth2.Endpoint{ // #nosec G101 -- Public dummy OAuth URLs, not credentials; these tests never exchange a code.
 			AuthURL:  "https://example.com/auth",
 			TokenURL: "https://example.com/token",
 		},

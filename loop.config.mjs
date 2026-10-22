@@ -15,6 +15,9 @@ export default {
     "rtk proxy sh -c 'go vet ./...'",
     // Explicit Git context keeps VCS stamping correct in linked worktrees.
     `rtk proxy sh -c 'GIT_DIR="$(rtk proxy git rev-parse --absolute-git-dir)" GIT_WORK_TREE="$(rtk proxy git rev-parse --show-toplevel)" go build ./...'`,
+    "rtk proxy golangci-lint run --config=.golangci.yml",
+    "rtk proxy make coverage",
+    "rtk proxy govulncheck ./...",
   ],
   maxRounds: 5,
   timeoutMs: 60 * 60 * 1000,

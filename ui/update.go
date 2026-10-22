@@ -506,12 +506,12 @@ func (m Model) updateReplying(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateSearching(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case msg.Type == tea.KeyEsc:
+	switch msg.Type {
+	case tea.KeyEsc:
 		m.state = stateInbox
 		return m, nil
 
-	case msg.Type == tea.KeyEnter:
+	case tea.KeyEnter:
 		q := strings.TrimSpace(m.searchInput.Value())
 		if q == "" {
 			return m, nil

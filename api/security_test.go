@@ -21,7 +21,11 @@ func TestSecurityTokenReplacement(t *testing.T) {
 			dir := t.TempDir()
 			target := filepath.Join(dir, "other")
 			path := filepath.Join(dir, "token.json")
-			if err := os.WriteFile(target, []byte("untouched"), 0644); err != nil {
+			if err := os.WriteFile(target, []byte("untouched"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Deliberately permissive fixture: verify unsafe existing files are handled safely.
+			if err := os.Chmod(target, 0644); err != nil {
 				t.Fatal(err)
 			}
 			if symlink {
@@ -29,7 +33,11 @@ func TestSecurityTokenReplacement(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				if err := os.WriteFile(path, []byte("old"), 0666); err != nil {
+				if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				// Deliberately permissive fixture: verify unsafe existing files are handled safely.
+				if err := os.Chmod(path, 0666); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -228,7 +236,11 @@ func (b *endlessAttachmentBody) Close() error { b.closed = true; return nil }
 func TestSecurityTokenLoadRejectsSymlinksAndPublicFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "token")
-	if err := os.WriteFile(path, []byte("{}"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately permissive fixture: verify unsafe existing files are handled safely.
+	if err := os.Chmod(path, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := loadToken(path); err == nil {
@@ -286,7 +298,7 @@ func TestSecurityRefreshFailureDoesNotExpandScopesOrLeak(t *testing.T) {
 		resp.StatusCode = 400
 		return resp, nil
 	})})
-	cfg := &oauth2.Config{Endpoint: oauth2.Endpoint{TokenURL: "https://offline.test/token"}, Scopes: []string{gmail.GmailModifyScope}}
+	cfg := &oauth2.Config{Endpoint: oauth2.Endpoint{TokenURL: "https://offline.test/token"}, Scopes: []string{gmail.GmailModifyScope}} // #nosec G101 -- Dummy OAuth URL, not a secret; the injected HTTP transport returns the test response.
 	_, _, err := getAuthenticatedClient(ctx, cfg)
 	if err == nil || !strings.Contains(err.Error(), "token refresh failed") || strings.Contains(err.Error(), "refresh-secret") {
 		t.Fatalf("unsafe refresh failure: %v", err)
@@ -297,7 +309,11 @@ func TestSecurityTokenIgnoresPermissiveLegacyTemp(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "token.json")
 	legacy := path + ".tmp"
-	if err := os.WriteFile(legacy, []byte("unchanged"), 0666); err != nil {
+	if err := os.WriteFile(legacy, []byte("unchanged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately permissive fixture: verify unsafe existing files are handled safely.
+	if err := os.Chmod(legacy, 0666); err != nil {
 		t.Fatal(err)
 	}
 	if err := saveToken(path, &oauth2.Token{AccessToken: "private"}, ""); err != nil {

@@ -21,6 +21,11 @@ The PR body should cover what changed and why, a summary of the task, the review
 outcome (how many rounds, plus any recorded disagreements), and anything
 deliberately left out of scope.
 
+Count the two earlier review rounds archived in `{{RUN_DIR}}/before-lint-repair`
+plus the actual review rounds from the lint-repair pass. Report the combined
+total, with a maximum of five overall (three additional rounds). Do not report
+only the current pass.
+
 ## Boundaries
 
 - If the worktree is **not** clean — `git status --porcelain` reports anything —

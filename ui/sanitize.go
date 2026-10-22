@@ -18,9 +18,10 @@ func displayText(s string) string {
 	for _, r := range s {
 		switch state {
 		case controlString:
-			if r == '\a' || r == '\u009c' {
+			switch r {
+			case '\a', '\u009c':
 				state = text
-			} else if r == '\x1b' {
+			case '\x1b':
 				state = stringEscape
 			}
 			continue

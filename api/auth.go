@@ -79,7 +79,7 @@ func loadOAuthConfig() (*oauth2.Config, error) {
 		credPath = credentialsFile
 	}
 
-	data, err := os.ReadFile(credPath)
+	data, err := os.ReadFile(credPath) // #nosec G703 -- The local user explicitly selects the OAuth credentials path; it is not remote input.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("credentials file not found at %s — see README for setup instructions: %w", credPath, err)
@@ -206,7 +206,7 @@ func saveToken(path string, token *oauth2.Token, scope string) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("failed to close token: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil { // #nosec G703 -- CreateTemp supplies the source; the local token destination is atomically replaced without following its symlink.
 		return fmt.Errorf("failed to rename token file: %w", err)
 	}
 	return nil
