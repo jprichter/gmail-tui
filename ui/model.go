@@ -35,28 +35,30 @@ type emailItem struct{ email api.Email }
 
 func (e emailItem) Title() string {
 	if e.email.IsUnread {
-		return "● " + e.email.Subject
+		return "● " + displayLine(e.email.Subject)
 	}
-	return "  " + e.email.Subject
+	return "  " + displayLine(e.email.Subject)
 }
 
 // Description returns the date, sender, and snippet for the list delegate.
 func (e emailItem) Description() string {
-	if e.email.Date != "" {
-		return e.email.Date + " • " + e.email.From + " - " + e.email.Snippet
+	if displayLine(e.email.Date) != "" {
+		return displayLine(e.email.Date) + " • " + displayLine(e.email.From) + " - " + displayLine(e.email.Snippet)
 	}
-	return e.email.From + " - " + e.email.Snippet
+	return displayLine(e.email.From) + " - " + displayLine(e.email.Snippet)
 }
 
 // FilterValue returns the text used for list filtering.
-func (e emailItem) FilterValue() string { return e.email.Subject + " " + e.email.From }
+func (e emailItem) FilterValue() string {
+	return displayLine(e.email.Subject) + " " + displayLine(e.email.From)
+}
 
 // labelItem wraps an api.Label for display in the labels list.
 type labelItem struct{ label api.Label }
 
-func (l labelItem) Title() string       { return l.label.Name }
+func (l labelItem) Title() string       { return displayLine(l.label.Name) }
 func (l labelItem) Description() string { return "" }
-func (l labelItem) FilterValue() string { return l.label.Name }
+func (l labelItem) FilterValue() string { return displayLine(l.label.Name) }
 
 // ---------- compose form ----------
 
@@ -86,7 +88,7 @@ func newComposeForm() composeForm {
 }
 
 func (f *composeForm) reset(from string) {
-	f.from.SetValue(from)
+	f.from.SetValue(displayLine(from))
 	f.to.SetValue("")
 	f.cc.SetValue("")
 	f.bcc.SetValue("")

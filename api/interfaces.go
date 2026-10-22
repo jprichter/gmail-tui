@@ -19,4 +19,5 @@ type ClientInterface interface {
 	DownloadAttachment(msgID, attachmentID, filename string) (string, error)
 	CacheSize() int
 	HasSendScope() bool
+	HasModifyScope() bool
 }

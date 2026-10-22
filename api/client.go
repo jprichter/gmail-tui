@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -23,11 +24,13 @@ const (
 
 // Client wraps the Gmail API with caching and concurrent fetching.
 type Client struct {
-	srv              *gmail.Service
-	cache            *lruCache
-	cfg              *Config
-	logger           *Logger
-	sendScopeGranted bool
+	srv                *gmail.Service
+	cache              *lruCache
+	cfg                *Config
+	logger             *Logger
+	sendScopeGranted   bool
+	modifyScopeGranted bool
+	readOnly           bool
 }
 
 // NewClient authenticates and returns a ready-to-use Client.
@@ -37,11 +40,13 @@ func NewClient(cfg *Config, logger *Logger) (*Client, error) {
 		return nil, err
 	}
 	return &Client{
-		srv:              srv,
-		cache:            newLRUCache(cfg.CacheMaxSize),
-		cfg:              cfg,
-		logger:           logger,
-		sendScopeGranted: strings.Contains(grantedScope, gmail.GmailSendScope),
+		srv:                srv,
+		cache:              newLRUCache(cfg.CacheMaxSize),
+		cfg:                cfg,
+		logger:             logger,
+		sendScopeGranted:   hasScope(grantedScope, gmail.GmailSendScope, gmail.GmailComposeScope, gmail.GmailModifyScope, gmail.MailGoogleComScope),
+		modifyScopeGranted: hasScope(grantedScope, gmail.GmailModifyScope, gmail.MailGoogleComScope),
+		readOnly:           readOnlyMode(),
 	}, nil
 }
 
@@ -101,6 +106,9 @@ func (c *Client) FetchLabels() ([]Label, error) {
 
 // DeleteEmail moves an email to trash and removes it from cache.
 func (c *Client) DeleteEmail(id string) error {
+	if !c.HasModifyScope() {
+		return errors.New("mailbox modification not permitted")
+	}
 	_, err := c.srv.Users.Messages.Trash("me", id).Do()
 	if err != nil {
 		return fmt.Errorf("deleteEmail: %w", err)
@@ -111,6 +119,9 @@ func (c *Client) DeleteEmail(id string) error {
 
 // ToggleRead flips the UNREAD label. Returns the new isUnread state.
 func (c *Client) ToggleRead(id string, currentlyUnread bool) (newUnread bool, err error) {
+	if !c.HasModifyScope() {
+		return currentlyUnread, errors.New("mailbox modification not permitted")
+	}
 	mod := &gmail.ModifyMessageRequest{}
 	if currentlyUnread {
 		mod.RemoveLabelIds = []string{"UNREAD"}
@@ -130,6 +141,9 @@ func (c *Client) ToggleRead(id string, currentlyUnread bool) (newUnread bool, er
 
 // ArchiveEmail removes the INBOX label so the message leaves the inbox.
 func (c *Client) ArchiveEmail(id string) error {
+	if !c.HasModifyScope() {
+		return errors.New("mailbox modification not permitted")
+	}
 	mod := &gmail.ModifyMessageRequest{RemoveLabelIds: []string{"INBOX"}}
 	if _, err := c.srv.Users.Messages.Modify("me", id, mod).Do(); err != nil {
 		return fmt.Errorf("archiveEmail: %w", err)
@@ -204,6 +218,9 @@ func buildRawMessage(o outgoing) (string, error) {
 
 // SendEmail constructs a proper MIME message and sends it.
 func (c *Client) SendEmail(to, cc, bcc, subject, body string, attachments []string) error {
+	if !c.HasSendScope() {
+		return errors.New("sending not permitted")
+	}
 	raw, err := buildRawMessage(outgoing{
 		to: to, cc: cc, bcc: bcc, subject: subject, body: body,
 		attachments: attachments,
@@ -227,43 +244,18 @@ func (c *Client) DownloadAttachment(msgID, attachmentID, filename string) (strin
 		return "", fmt.Errorf("download failed: %w", err)
 	}
 
-	// 2. Decode base64.
+	// Reject oversized metadata and encoded input before allocating decoded data.
+	if att.Size < 0 || att.Size > maxAttachmentSize || len(att.Data) > base64.StdEncoding.EncodedLen(maxAttachmentSize) {
+		return "", errors.New("attachment too large (25 MiB maximum)")
+	}
 	data, err := decodeBase64Robust(att.Data)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode: %w", err)
 	}
-
-	// 3. Create downloads directory.
-	if err := os.MkdirAll(c.cfg.DownloadsDir, 0755); err != nil {
-		return "", fmt.Errorf("couldn't create downloads directory: %w", err)
+	if len(data) > maxAttachmentSize {
+		return "", errors.New("attachment too large (25 MiB maximum)")
 	}
-
-	// 4. Sanitize filename.
-	safe := sanitizeFilename(filename)
-
-	// 5. Compute unique path (no overwrite).
-	path := uniqueFilePath(c.cfg.DownloadsDir, safe)
-
-	// 6. Verify path stays within downloads dir (traversal guard).
-	absDownloads, err := filepath.Abs(c.cfg.DownloadsDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve downloads dir: %w", err)
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve download path: %w", err)
-	}
-	if !strings.HasPrefix(absPath, absDownloads+string(filepath.Separator)) {
-		return "", fmt.Errorf("download path escapes downloads directory: %s", absPath)
-	}
-
-	// 7. Write file.
-	if err := os.WriteFile(absPath, data, 0600); err != nil {
-		return "", fmt.Errorf("save failed: %w", err)
-	}
-
-	// 8. Return absolute path.
-	return absPath, nil
+	return saveAttachment(c.cfg.DownloadsDir, filename, data)
 }
 
 // FetchInboxPage returns a page of inbox emails along with the next page token.
@@ -295,6 +287,9 @@ func (c *Client) GetUserProfile() (string, error) {
 // SendReply sends a reply to an existing email thread, setting the appropriate
 // In-Reply-To and References headers for proper threading.
 func (c *Client) SendReply(to, subject, body, inReplyTo, references string, attachments []string) error {
+	if !c.HasSendScope() {
+		return errors.New("sending not permitted")
+	}
 	raw, err := buildRawMessage(outgoing{
 		to: to, subject: subject, body: body,
 		inReplyTo: inReplyTo, references: references,
@@ -314,11 +309,13 @@ func (c *Client) CacheSize() int {
 	return c.cache.Size()
 }
 
-// HasSendScope reports whether the authenticated token was actually granted
-// the Gmail send scope (the user can deselect it on Google's consent screen).
+// HasSendScope reports effective sending capability, including modify/compose grants.
 func (c *Client) HasSendScope() bool {
-	return c.sendScopeGranted
+	return !c.readOnly && c.sendScopeGranted
 }
+
+// HasModifyScope reports effective permission to trash, archive or mark messages.
+func (c *Client) HasModifyScope() bool { return !c.readOnly && c.modifyScopeGranted }
 
 // ---------- internal ----------
 
@@ -447,21 +444,57 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
-// uniqueFilePath returns a path that does not yet exist by appending (N) before the extension.
-func uniqueFilePath(dir, filename string) string {
-	path := filepath.Join(dir, filename)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return path
+// saveAttachment pins the selected directory with os.Root and atomically reserves
+// a new basename. O_EXCL rejects existing files and symlinks, including dangling ones.
+func saveAttachment(dir, filename string, data []byte) (string, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
 	}
-	ext := filepath.Ext(filename)
-	base := strings.TrimSuffix(filename, ext)
-	for i := 1; i <= 9999; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("%s(%d)%s", base, i, ext))
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			return candidate
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(absDir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	name := sanitizeFilename(filename)
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 0; i <= 9999; i++ {
+		candidate := name
+		if i > 0 {
+			candidate = fmt.Sprintf("%s(%d)%s", base, i, ext)
+		}
+		f, err := root.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("save failed: %w", err)
+		}
+		_, writeErr := f.Write(data)
+		closeErr := f.Close()
+		if err := errors.Join(writeErr, closeErr); err != nil {
+			return "", fmt.Errorf("save failed (partial file retained): %w", err)
+		}
+		return filepath.Join(absDir, candidate), nil
+	}
+	return "", errors.New("attachment filename collision limit exhausted")
+}
+
+func readOnlyMode() bool { return os.Getenv("GMAIL_TUI_READ_ONLY") == "1" }
+
+func hasScope(granted string, scopes ...string) bool {
+	for _, grant := range strings.Fields(granted) {
+		for _, scope := range scopes {
+			if grant == scope {
+				return true
+			}
 		}
 	}
-	return path // fallback: overwrite if somehow all 9999 slots taken
+	return false
 }
 
 func decodeBase64Robust(s string) ([]byte, error) {

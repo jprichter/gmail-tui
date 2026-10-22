@@ -307,7 +307,7 @@ func newHTTPTestClient(t testing.TB, cfg *Config, fn roundTripFunc) *Client {
 
 	srv, err := gmail.NewService(
 		context.Background(),
-		option.WithHTTPClient(&http.Client{Transport: fn}),
+		option.WithHTTPClient(attachmentLimitedClient(&http.Client{Transport: fn})),
 		option.WithEndpoint("https://gmail.test/"),
 	)
 	if err != nil {
@@ -315,11 +315,12 @@ func newHTTPTestClient(t testing.TB, cfg *Config, fn roundTripFunc) *Client {
 	}
 
 	return &Client{
-		srv:              srv,
-		cache:            newLRUCache(cfg.CacheMaxSize),
-		cfg:              cfg,
-		logger:           NoopLogger(),
-		sendScopeGranted: true,
+		srv:                srv,
+		cache:              newLRUCache(cfg.CacheMaxSize),
+		cfg:                cfg,
+		logger:             NoopLogger(),
+		sendScopeGranted:   true,
+		modifyScopeGranted: true,
 	}
 }
 
