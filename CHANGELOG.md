@@ -22,6 +22,10 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 - Snippets are HTML-entity decoded and truncated on rune boundaries.
 - OAuth state parameter is now cryptographically random and verified on callback (was a static string); the gitignore warning only fires when using a local `credentials.json`.
 - Status messages now always auto-clear; `q`/`ctrl+c` quits from the loading screen.
+- Capability checks follow the granted scopes. A `gmail.modify` or `gmail.compose` grant now enables sending even if `gmail.send` was deselected, because Google's `gmail.modify` scope also permits sending.
+- Cached tokens are rejected when they are symlinks or group/world-readable. Fix with `chmod 600 ~/.gmail-tui-token.json`, or remove the file and reauthenticate.
+- Attachment name collisions get numbered names (`name(1).ext`) and fail after 9999 candidates instead of overwriting an existing file.
+- Go toolchain requirement raised to 1.26.10; `golang.org/x/net` updated to v0.60.0 and `google.golang.org/grpc` to v1.83.2.
 
 ### Fixed
 
@@ -29,6 +33,16 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 - Reply `References` header now appends the replied message's `Message-ID` per RFC 5322, fixing thread grouping in strict clients.
 - Toggling read/unread while viewing an email updates the open email, not just the list row.
 - Cache reads return copies and unread updates happen under the cache lock, removing a data race with concurrent fetch workers.
+
+### Security
+
+- Untrusted text (inbox rows, labels, snippets, headers, message bodies, attachment names, status and error messages) is stripped of terminal control sequences before display. This covers CSI, OSC (including OSC 52 clipboard and OSC 8 links), DCS/APC/PM/SOS, C1 controls, carriage returns, backspace, and bidi override/isolate controls. Sent message content is not modified.
+- OAuth loopback and manual flows use PKCE (S256). Random state and 127.0.0.1-only loopback binding are unchanged.
+- Token writes use a unique 0600 temporary file and an atomic rename. Symlinked token paths are rejected on load and replaced on save.
+- OAuth exchange and refresh errors, and malformed credential errors, no longer include provider response bodies or credential contents.
+- Added `GMAIL_TUI_READ_ONLY=1`, which requests only `gmail.readonly` and disables send, compose, reply, trash, archive, and read/unread changes. Existing broad tokens are not revoked by this mode; see the README privacy section.
+- Attachment downloads are created with exclusive no-follow semantics inside a pinned directory, and incoming attachment responses are capped at 25 MiB. This is local filesystem and race hardening, not a remote-overwrite fix.
+
 
 - Configuration loading from TOML and `GMAIL_TUI_*` environment variables.
 - Structured JSON logging and a bounded LRU email cache.

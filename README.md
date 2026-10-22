@@ -6,7 +6,7 @@
 
 - Concurrent inbox fetch using bounded worker goroutines, backed by an LRU cache to avoid redundant API calls.
 - Compose, reply (with `Re:` subject normalization and thread headers), delete, search, label browsing, read/unread toggling.
-- Attachment download with filename sanitization, path-escape protection, and dedup.
+- Attachment download with filename sanitization, symlink-safe exclusive writes, and numbered names instead of overwrites.
 - Layered configuration: built-in defaults → TOML file → `GMAIL_TUI_*` env vars.
 - Structured JSON logging to `~/.config/gmail-tui/app.log`.
 - Pagination and preserved search state across navigation.
@@ -75,7 +75,7 @@ log_level = "INFO"
 inbox_query = "in:inbox category:primary"
 ```
 
-Equivalent env vars: `GMAIL_TUI_MAX_RESULTS`, `GMAIL_TUI_SEARCH_MAX_RESULTS`, `GMAIL_TUI_DOWNLOADS_DIR`, `GMAIL_TUI_MAX_CONCURRENT`, `GMAIL_TUI_CACHE_MAX_SIZE`, `GMAIL_TUI_LOG_LEVEL`, `GMAIL_TUI_INBOX_QUERY`, `GMAIL_TUI_CREDENTIALS`.
+Equivalent env vars: `GMAIL_TUI_MAX_RESULTS`, `GMAIL_TUI_SEARCH_MAX_RESULTS`, `GMAIL_TUI_DOWNLOADS_DIR`, `GMAIL_TUI_MAX_CONCURRENT`, `GMAIL_TUI_CACHE_MAX_SIZE`, `GMAIL_TUI_LOG_LEVEL`, `GMAIL_TUI_INBOX_QUERY`, `GMAIL_TUI_CREDENTIALS`. `GMAIL_TUI_READ_ONLY=1` is also read from the environment (not from the TOML file); see [OAuth, storage, and privacy](#oauth-storage-and-privacy).
 
 `inbox_query` controls what the main list shows — e.g. `in:inbox` to include all categories, not just Primary.
 
@@ -128,6 +128,7 @@ Sending with an empty recipient is rejected inline (`Error: recipient address is
 ├── api/                # Gmail API layer, no UI dependency
 │   ├── auth.go          # OAuth2 flow, token persistence
 │   ├── client.go         # Gmail REST calls (list, get, send, trash, labels, attachments)
+│   ├── attachment_transport.go # caps attachment HTTP responses before JSON decoding
 │   ├── cache.go          # bounded LRU cache for fetched messages
 │   ├── config.go         # layered config load (defaults/TOML/env)
 │   ├── parse.go           # MIME/body parsing, HTML stripping
@@ -142,11 +143,13 @@ Sending with an empty recipient is rejected inline (`Error: recipient address is
 │   ├── update.go          # message handling / state transitions
 │   ├── commands.go         # async tea.Cmd wrappers around api/ calls
 │   ├── view.go              # rendering
+│   ├── sanitize.go          # strips terminal control sequences from untrusted text
 │   ├── keys.go               # keybinding definitions
 │   └── *_test.go, property_test.go
 ├── third_party/rapid/  # vendored pgregory.net/rapid (property-based testing)
 ├── images/             # screenshots used in this README
 ├── .github/workflows/  # CI: build, test, lint
+├── loop.config.mjs, .loop/prompts/  # aloop phase configuration and tracked prompts
 └── .golangci.yml, .pre-commit-config.yaml
 ```
 
@@ -161,7 +164,7 @@ Sending with an empty recipient is rejected inline (`Error: recipient address is
 ## Challenges
 
 - Gmail messages arrive as nested multipart MIME with inconsistent charset/encoding; `parse.go` and its large test suite (`parse_test.go`, `property_test.go`) exist because plain-text extraction and HTML stripping had many edge cases (empty parts, base64 padding, nested alternatives).
-- Attachment handling needed explicit path-escape and size-limit checks (`download path escapes downloads directory`, 25 MB cap) since filenames come from an untrusted remote source.
+- Attachment handling needed explicit path-escape and size-limit checks (`sanitizeFilename`, `os.Root`-pinned exclusive creation, 25 MiB cap) since filenames come from an untrusted remote source.
 - Keeping the Gmail client fully decoupled from Bubble Tea required deliberate interface boundaries (`interfaces.go`) so async commands could be tested without a live terminal or real network.
 
 ## Future Improvements
