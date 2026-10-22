@@ -99,6 +99,15 @@ golangci-lint run
 
 (`make test`, `make build`, `make lint`, `make coverage` wrap the same commands if `make` is available.)
 
+Running the `aloop` gates requires `rtk`, `make`, `golangci-lint` v2.10.1 (pinned to match CI), and `govulncheck` on `PATH`, in addition to Go. Install the two Go tools with:
+
+```bash
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1
+go install golang.org/x/vuln/cmd/govulncheck@latest
+```
+
+Add `$(go env GOPATH)/bin` to `PATH` (or your `GOBIN` if set).
+
 ## Example usage
 
 | Key | Action |
@@ -219,4 +228,4 @@ go build ./...
 govulncheck ./...
 ```
 
-The offline tests use temporary files, mock Gmail transports, and local HTTP servers. They cover terminal rendering/list delegates, PKCE/state, secret redaction, token permissions/replacement, effective grants/read-only policy, attachment symlinks/concurrent reservations/collision exhaustion, and incoming size limits. `loop.config.mjs` and the tracked `.loop/prompts` configure implementation, docs, gates, review/repair, and draft PR publication against the fork's `main`. `.loop` run state, `.loop-worktrees/`, token files, and `app.log` are git-ignored. `make coverage` output (`coverage*.out`, `coverage.html`) and the Makefile's `.tmp/` cache are not yet ignored, so remove them before committing. The build gate supplies Git context computed with `git rev-parse` so VCS stamping works in linked worktrees even when an ancestor has an invalid `.git` directory. The operator handles merge; this flow does not release or contact upstream.
+The offline tests use temporary files, mock Gmail transports, and local HTTP servers. They cover terminal rendering/list delegates, PKCE/state, secret redaction, token permissions/replacement, effective grants/read-only policy, attachment symlinks/concurrent reservations/collision exhaustion, and incoming size limits. `loop.config.mjs` and the tracked `.loop/prompts` configure implementation, docs, gates, review/repair, and draft PR publication against the fork's `main`. `.loop` run state, `.loop-worktrees/`, token files, and `app.log` are git-ignored. Root-level `make coverage` reports (`coverage.out`, `coverage_api.out`, `coverage.html`), the Makefile's `.tmp/` directory, and default local attachment `downloads/` directory are also git-ignored. The build gate supplies Git context computed with `git rev-parse` so VCS stamping works in linked worktrees even when an ancestor has an invalid `.git` directory. The operator handles merge; this flow does not release or contact upstream.

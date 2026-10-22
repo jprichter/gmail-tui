@@ -16,3 +16,10 @@ credentials.json
 !.loop/prompts/
 .loop-worktrees/
 app.log
+
+# Generated coverage reports and local working directories
+/coverage.html
+/coverage.out
+/coverage_api.out
+/.tmp/
+/downloads/
