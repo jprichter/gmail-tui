@@ -11,10 +11,10 @@ export default {
   phases: ['implement', 'docs', 'gate', 'review', 'address', 'pr-description', 'publish'],
   publish: { backend: 'github', draft: true },
   gate: [
-    "rtk proxy env GOMODCACHE=/tmp/chat-security-tools/mod GOCACHE=/tmp/chat-security-tools/build GOTOOLCHAIN=auto sh -c 'go test -race ./...'",
-    "rtk proxy env GOMODCACHE=/tmp/chat-security-tools/mod GOCACHE=/tmp/chat-security-tools/build GOTOOLCHAIN=auto sh -c 'go vet ./...'",
+    "rtk proxy sh -c 'go test -race ./...'",
+    "rtk proxy sh -c 'go vet ./...'",
     // Explicit Git context keeps VCS stamping correct in linked worktrees.
-    `rtk proxy env GOMODCACHE=/tmp/chat-security-tools/mod GOCACHE=/tmp/chat-security-tools/build GOTOOLCHAIN=auto sh -c 'GIT_DIR="$(rtk proxy git rev-parse --absolute-git-dir)" GIT_WORK_TREE="$(rtk proxy git rev-parse --show-toplevel)" go build ./...'`,
+    `rtk proxy sh -c 'GIT_DIR="$(rtk proxy git rev-parse --absolute-git-dir)" GIT_WORK_TREE="$(rtk proxy git rev-parse --show-toplevel)" go build ./...'`,
   ],
   maxRounds: 5,
   timeoutMs: 60 * 60 * 1000,
