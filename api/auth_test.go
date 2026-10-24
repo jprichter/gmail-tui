@@ -85,8 +85,8 @@ func TestLoadOAuthConfigInvalidJSON(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Fatalf("expected invalid JSON error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "REPLACE_WITH_THINE") {
-		t.Fatalf("expected error to contain the invalid content, got %v", err)
+	if strings.Contains(err.Error(), "REPLACE_WITH_THINE") {
+		t.Fatalf("error leaked invalid credential content, got %v", err)
 	}
 }
 
@@ -131,18 +131,18 @@ func TestSaveTokenAndLoadToken(t *testing.T) {
 	}
 }
 
-func TestLoadTokenCorruptedFileRemovesIt(t *testing.T) {
+func TestLoadTokenCorruptedFilePreservesIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token.json")
 	if err := os.WriteFile(path, []byte("not-json"), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	_, _, err := loadToken(path)
-	if err == nil || !strings.Contains(err.Error(), "corrupted file removed") {
+	if err == nil || !strings.Contains(err.Error(), "failed to decode token") {
 		t.Fatalf("expected corruption error, got %v", err)
 	}
-	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
-		t.Fatalf("expected corrupted token file to be removed, err = %v", statErr)
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("expected corrupted token file to be preserved, err = %v", statErr)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestGetAuthenticatedClientUsesSavedToken(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "http://127.0.0.1",
-		Endpoint: oauth2.Endpoint{
+		Endpoint: oauth2.Endpoint{ // #nosec G101 -- Public dummy OAuth URLs, not credentials; these tests never exchange a code.
 			AuthURL:  "https://example.com/auth",
 			TokenURL: "https://example.com/token",
 		},
@@ -226,7 +226,15 @@ func TestPerformOAuthFlow(t *testing.T) {
 }
 
 func TestPerformLoopbackFlow(t *testing.T) {
+	var challenge string
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		verifier := r.Form.Get("code_verifier")
+		if len(verifier) < 43 || oauth2.S256ChallengeFromVerifier(verifier) != challenge {
+			t.Error("PKCE verifier does not match authorization challenge")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "access-token",
@@ -254,10 +262,17 @@ func TestPerformLoopbackFlow(t *testing.T) {
 
 	// Intercept the auth URL to recover the state, then simulate the
 	// browser hitting the local callback.
+	callbackDone := make(chan struct{})
 	oldOpen := openBrowserFn
 	defer func() { openBrowserFn = oldOpen }()
 	openBrowserFn = func(authURL string) {
+		u, _ := url.Parse(authURL)
+		challenge = u.Query().Get("code_challenge")
+		if u.Query().Get("code_challenge_method") != "S256" || challenge == "" {
+			t.Error("missing S256 challenge")
+		}
 		go func() {
+			defer close(callbackDone)
 			u, err := url.Parse(authURL)
 			if err != nil {
 				t.Errorf("parse auth url: %v", err)
@@ -275,6 +290,7 @@ func TestPerformLoopbackFlow(t *testing.T) {
 	}
 
 	token, scope, err := performLoopbackFlow(context.Background(), cfg, ln)
+	<-callbackDone
 	if err != nil {
 		t.Fatalf("performLoopbackFlow() error = %v", err)
 	}
@@ -289,7 +305,7 @@ func TestPerformLoopbackFlow(t *testing.T) {
 func TestPerformLoopbackFlowRejectsBadState(t *testing.T) {
 	cfg := &oauth2.Config{
 		ClientID: "client-id",
-		Endpoint: oauth2.Endpoint{
+		Endpoint: oauth2.Endpoint{ // #nosec G101 -- Public dummy OAuth URLs, not credentials; these tests never exchange a code.
 			AuthURL:  "https://example.com/auth",
 			TokenURL: "https://example.com/token",
 		},
@@ -300,10 +316,12 @@ func TestPerformLoopbackFlowRejectsBadState(t *testing.T) {
 		t.Fatalf("Listen() error = %v", err)
 	}
 
+	callbackDone := make(chan struct{})
 	oldOpen := openBrowserFn
 	defer func() { openBrowserFn = oldOpen }()
 	openBrowserFn = func(authURL string) {
 		go func() {
+			defer close(callbackDone)
 			resp, err := http.Get("http://" + ln.Addr().String() + "/callback?state=wrong&code=auth-code")
 			if err != nil {
 				t.Errorf("callback request: %v", err)
@@ -314,6 +332,7 @@ func TestPerformLoopbackFlowRejectsBadState(t *testing.T) {
 	}
 
 	_, _, err = performLoopbackFlow(context.Background(), cfg, ln)
+	<-callbackDone
 	if err == nil || !strings.Contains(err.Error(), "state mismatch") {
 		t.Fatalf("expected state mismatch error, got %v", err)
 	}

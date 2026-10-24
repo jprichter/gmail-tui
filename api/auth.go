@@ -65,7 +65,7 @@ func newGmailService() (*gmail.Service, string, error) {
 		return nil, "", fmt.Errorf("failed to get authenticated client: %w", err)
 	}
 
-	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
+	srv, err := gmail.NewService(ctx, option.WithHTTPClient(attachmentLimitedClient(client)))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create Gmail service: %w", err)
 	}
@@ -79,7 +79,7 @@ func loadOAuthConfig() (*oauth2.Config, error) {
 		credPath = credentialsFile
 	}
 
-	data, err := os.ReadFile(credPath)
+	data, err := os.ReadFile(credPath) // #nosec G703 -- The local user explicitly selects the OAuth credentials path; it is not remote input.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("credentials file not found at %s — see README for setup instructions: %w", credPath, err)
@@ -88,10 +88,14 @@ func loadOAuthConfig() (*oauth2.Config, error) {
 	}
 
 	if !json.Valid(data) {
-		return nil, fmt.Errorf("credentials file at %s is not valid JSON — ensure you have downloaded your OAuth client credentials correctly (see README): %s", credPath, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("credentials file at %s is not valid JSON — ensure you have downloaded your OAuth client credentials correctly (see README)", credPath)
 	}
 
-	config, err := google.ConfigFromJSON(data, gmail.GmailReadonlyScope, gmail.GmailSendScope, gmail.GmailModifyScope)
+	scopes := []string{gmail.GmailReadonlyScope, gmail.GmailSendScope, gmail.GmailModifyScope}
+	if readOnlyMode() {
+		scopes = []string{gmail.GmailReadonlyScope}
+	}
+	config, err := google.ConfigFromJSON(data, scopes...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
 	}
@@ -111,6 +115,9 @@ func getAuthenticatedClient(ctx context.Context, config *oauth2.Config) (*http.C
 
 	token, scope, err := loadToken(tokenPath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, "", fmt.Errorf("cannot load cached token; repair or remove it before reauthentication: %w", err)
+		}
 		token, scope, err = performOAuthFlow(ctx, config)
 		if err != nil {
 			return nil, "", fmt.Errorf("OAuth flow failed: %w", err)
@@ -123,23 +130,20 @@ func getAuthenticatedClient(ctx context.Context, config *oauth2.Config) (*http.C
 	ts := config.TokenSource(ctx, token)
 	refreshedToken, err := ts.Token()
 	if err != nil {
-		token, scope, err = performOAuthFlow(ctx, config)
-		if err != nil {
-			return nil, "", fmt.Errorf("OAuth flow failed after refresh error: %w", err)
-		}
-		if err := saveToken(tokenPath, token, scope); err != nil {
-			return nil, "", fmt.Errorf("failed to save token: %w", err)
-		}
-		return config.Client(ctx, token), scope, nil
+		// Reauthorizing with default scopes could expand a narrower old grant.
+		// Provider response bodies can also contain tokens; do not surface them.
+		return nil, "", errors.New("token refresh failed; remove the cached token and reauthenticate with the intended scope mode")
 	}
 
 	if refreshedToken.AccessToken != token.AccessToken ||
 		refreshedToken.RefreshToken != token.RefreshToken ||
 		!refreshedToken.Expiry.Equal(token.Expiry) {
-		_ = saveToken(tokenPath, refreshedToken, scope)
+		if err := saveToken(tokenPath, refreshedToken, scope); err != nil {
+			return nil, "", fmt.Errorf("failed to save refreshed token: %w", err)
+		}
 	}
 
-	return oauth2.NewClient(ctx, ts), scope, nil
+	return oauth2.NewClient(ctx, redactedTokenSource{source: ts}), scope, nil
 }
 
 func getTokenPath() (string, error) {
@@ -158,35 +162,51 @@ type storedToken struct {
 }
 
 func loadToken(path string) (*oauth2.Token, string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, "", errors.New("token must be a private regular file (0600)")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, "", err
 	}
 
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		f.Close()
+		return nil, "", errors.New("token file changed while opening")
+	}
 	stored := storedToken{Token: &oauth2.Token{}}
 	decodeErr := json.NewDecoder(f).Decode(&stored)
 	f.Close()
-	if decodeErr != nil {
-		os.Remove(path)
-		return nil, "", fmt.Errorf("failed to decode token (corrupted file removed): %w", decodeErr)
+	if decodeErr != nil || stored.Token == nil {
+		return nil, "", errors.New("failed to decode token")
 	}
 	return stored.Token, stored.Scope, nil
 }
 
 func saveToken(path string, token *oauth2.Token, scope string) error {
-	tmpPath := path + ".tmp"
-	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	f, err := os.CreateTemp(filepath.Dir(path), ".gmail-tui-token-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp token file: %w", err)
 	}
+	tmpPath := f.Name()
+	defer os.Remove(tmpPath)
 	if err := json.NewEncoder(f).Encode(storedToken{Token: token, Scope: scope}); err != nil {
 		f.Close()
-		os.Remove(tmpPath)
 		return fmt.Errorf("failed to encode token: %w", err)
 	}
-	f.Close()
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to sync token: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close token: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil { // #nosec G703 -- CreateTemp supplies the source; the local token destination is atomically replaced without following its symlink.
 		return fmt.Errorf("failed to rename token file: %w", err)
 	}
 	return nil
@@ -259,7 +279,8 @@ func performLoopbackFlow(ctx context.Context, config *oauth2.Config, ln net.List
 
 	cfg := *config
 	cfg.RedirectURL = fmt.Sprintf("http://%s/callback", ln.Addr().String())
-	authURL := cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
+	verifier := oauth2.GenerateVerifier()
+	authURL := cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 
 	results := make(chan callbackResult, 1)
 	deliver := func(r callbackResult) {
@@ -277,14 +298,14 @@ func performLoopbackFlow(ctx context.Context, config *oauth2.Config, ln net.List
 				return
 			}
 			q := r.URL.Query()
-			if errParam := q.Get("error"); errParam != "" {
-				http.Error(w, "Authorization failed: "+errParam, http.StatusBadRequest)
-				deliver(callbackResult{err: fmt.Errorf("authorization denied: %s", errParam)})
-				return
-			}
 			if q.Get("state") != state {
 				http.Error(w, "Invalid state parameter.", http.StatusBadRequest)
-				deliver(callbackResult{err: fmt.Errorf("OAuth state mismatch — possible CSRF, aborting")})
+				deliver(callbackResult{err: errors.New("OAuth state mismatch — possible CSRF, aborting")})
+				return
+			}
+			if q.Get("error") != "" {
+				http.Error(w, "Authorization failed.", http.StatusBadRequest)
+				deliver(callbackResult{err: errors.New("authorization denied")})
 				return
 			}
 			code := q.Get("code")
@@ -299,7 +320,13 @@ func performLoopbackFlow(ctx context.Context, config *oauth2.Config, ln net.List
 		}),
 	}
 	go srv.Serve(ln) //nolint:errcheck // returns ErrServerClosed on shutdown
-	defer srv.Close()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			srv.Close()
+		}
+	}()
 
 	fmt.Printf("\nAuthorization required. Opening your browser; if nothing happens, visit:\n%s\n\nWaiting for authorization...\n", authURL)
 	openBrowserFn(authURL)
@@ -309,9 +336,9 @@ func performLoopbackFlow(ctx context.Context, config *oauth2.Config, ln net.List
 		if res.err != nil {
 			return nil, "", res.err
 		}
-		token, err := cfg.Exchange(ctx, res.code)
+		token, err := cfg.Exchange(ctx, res.code, oauth2.VerifierOption(verifier))
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to exchange authorization code: %w", err)
+			return nil, "", errors.New("failed to exchange authorization code")
 		}
 		return token, grantedScope(token, &cfg), nil
 	case <-time.After(oauthCallbackTimeout):
@@ -328,7 +355,8 @@ func performManualFlow(ctx context.Context, config *oauth2.Config) (*oauth2.Toke
 	if err != nil {
 		return nil, "", err
 	}
-	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
+	verifier := oauth2.GenerateVerifier()
+	authURL := config.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 	fmt.Printf("\nAuthorization required. Please visit:\n%s\n\n", authURL)
 	fmt.Print("Enter authorization code: ")
 
@@ -337,9 +365,9 @@ func performManualFlow(ctx context.Context, config *oauth2.Config) (*oauth2.Toke
 		return nil, "", fmt.Errorf("failed to read authorization code: %w", err)
 	}
 
-	token, err := config.Exchange(ctx, code)
+	token, err := config.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to exchange authorization code: %w", err)
+		return nil, "", errors.New("failed to exchange authorization code")
 	}
 	return token, grantedScope(token, config), nil
 }
@@ -361,4 +389,16 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	_ = cmd.Start()
+}
+
+// OAuth provider errors may embed response bodies containing credentials. Apply
+// redaction to later automatic refreshes too, before API errors reach logs/UI.
+type redactedTokenSource struct{ source oauth2.TokenSource }
+
+func (s redactedTokenSource) Token() (*oauth2.Token, error) {
+	token, err := s.source.Token()
+	if err != nil {
+		return nil, errors.New("OAuth token refresh failed; reauthenticate with the intended scope mode")
+	}
+	return token, nil
 }

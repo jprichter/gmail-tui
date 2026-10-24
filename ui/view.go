@@ -53,13 +53,13 @@ func (m Model) statusBar() string {
 		if strings.HasPrefix(m.statusMessage, "Error:") {
 			prefix = "[ERROR] "
 		}
-		return "\n" + prefix + m.statusMessage + "\n"
+		return "\n" + prefix + displayLine(m.statusMessage) + "\n"
 	}
 	s := statusStyle
 	if strings.HasPrefix(m.statusMessage, "Error:") {
 		s = errorStyle
 	}
-	return "\n" + s.Render(m.statusMessage) + "\n"
+	return "\n" + s.Render(displayLine(m.statusMessage)) + "\n"
 }
 
 func (m Model) loadingView() string {
@@ -85,16 +85,16 @@ func (m Model) inboxView() string {
 func (m Model) emailView() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("\nFrom: %s\n", m.currentEmail.From))
-	b.WriteString(fmt.Sprintf("To: %s\n", m.currentEmail.To))
+	fmt.Fprintf(&b, "\nFrom: %s\n", displayLine(m.currentEmail.From))
+	fmt.Fprintf(&b, "To: %s\n", displayLine(m.currentEmail.To))
 	if m.currentEmail.CC != "" {
-		b.WriteString(fmt.Sprintf("CC: %s\n", m.currentEmail.CC))
+		fmt.Fprintf(&b, "CC: %s\n", displayLine(m.currentEmail.CC))
 	}
 	if m.currentEmail.BCC != "" {
-		b.WriteString(fmt.Sprintf("BCC: %s\n", m.currentEmail.BCC))
+		fmt.Fprintf(&b, "BCC: %s\n", displayLine(m.currentEmail.BCC))
 	}
-	b.WriteString(fmt.Sprintf("Subject: %s\n", m.currentEmail.Subject))
-	b.WriteString(fmt.Sprintf("Date: %s\n\n", m.currentEmail.Date))
+	fmt.Fprintf(&b, "Subject: %s\n", displayLine(m.currentEmail.Subject))
+	fmt.Fprintf(&b, "Date: %s\n\n", displayLine(m.currentEmail.Date))
 	b.WriteString(m.viewport.View())
 	b.WriteString("\n")
 
@@ -102,13 +102,13 @@ func (m Model) emailView() string {
 		b.WriteString("\nDownload which attachment? (1-9) [esc] cancel\n")
 		for i, att := range m.currentEmail.Attachments {
 			if i < 9 {
-				b.WriteString(fmt.Sprintf("  [%d] %s (%s)\n", i+1, att.Filename, humanSize(att.Size)))
+				fmt.Fprintf(&b, "  [%d] %s (%s)\n", i+1, displayLine(att.Filename), humanSize(att.Size))
 			}
 		}
 	} else if len(m.currentEmail.Attachments) > 0 {
 		b.WriteString("\nAttachments:\n")
 		for i, att := range m.currentEmail.Attachments {
-			b.WriteString(fmt.Sprintf("  [%d] %s (%s)\n", i+1, att.Filename, humanSize(att.Size)))
+			fmt.Fprintf(&b, "  [%d] %s (%s)\n", i+1, displayLine(att.Filename), humanSize(att.Size))
 		}
 	}
 
@@ -129,23 +129,23 @@ func (m Model) composeView() string {
 	var b strings.Builder
 
 	b.WriteString("\n  Compose New Email\n\n")
-	b.WriteString(fmt.Sprintf("%s %s\n", fieldLabel(m.compose.focused, 0, "From"), m.compose.from.View()))
-	b.WriteString(fmt.Sprintf("%s %s\n", fieldLabel(m.compose.focused, 1, "To  "), m.compose.to.View()))
-	b.WriteString(fmt.Sprintf("%s %s\n", fieldLabel(m.compose.focused, 2, "CC  "), m.compose.cc.View()))
-	b.WriteString(fmt.Sprintf("%s %s\n", fieldLabel(m.compose.focused, 3, "BCC "), m.compose.bcc.View()))
-	b.WriteString(fmt.Sprintf("%s %s\n\n", fieldLabel(m.compose.focused, 4, "Subj"), m.compose.subject.View()))
+	fmt.Fprintf(&b, "%s %s\n", fieldLabel(m.compose.focused, 0, "From"), m.compose.from.View())
+	fmt.Fprintf(&b, "%s %s\n", fieldLabel(m.compose.focused, 1, "To  "), m.compose.to.View())
+	fmt.Fprintf(&b, "%s %s\n", fieldLabel(m.compose.focused, 2, "CC  "), m.compose.cc.View())
+	fmt.Fprintf(&b, "%s %s\n", fieldLabel(m.compose.focused, 3, "BCC "), m.compose.bcc.View())
+	fmt.Fprintf(&b, "%s %s\n\n", fieldLabel(m.compose.focused, 4, "Subj"), m.compose.subject.View())
 
 	bodyLabel := "  Body"
 	if m.compose.focused == 5 {
 		bodyLabel = "▶ Body"
 	}
-	b.WriteString(fmt.Sprintf("%s (%d chars):\n", bodyLabel, len(m.compose.body.Value())))
+	fmt.Fprintf(&b, "%s (%d chars):\n", bodyLabel, len(m.compose.body.Value()))
 	b.WriteString(m.compose.body.View() + "\n")
 
 	if len(m.compose.attachments) > 0 {
 		b.WriteString("\nAttachments:\n")
 		for i, f := range m.compose.attachments {
-			b.WriteString(fmt.Sprintf("  [%d] %s\n", i+1, filepath.Base(f)))
+			fmt.Fprintf(&b, "  [%d] %s\n", i+1, displayLine(filepath.Base(f)))
 		}
 	}
 
@@ -161,14 +161,14 @@ func (m Model) composeView() string {
 func (m Model) replyView() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("\n  Reply to: %s\n", m.replyTo.From))
-	b.WriteString(fmt.Sprintf("  Subject: %s\n\n", formatReplySubject(m.replyTo.Subject)))
+	fmt.Fprintf(&b, "\n  Reply to: %s\n", displayLine(m.replyTo.From))
+	fmt.Fprintf(&b, "  Subject: %s\n\n", displayLine(formatReplySubject(m.replyTo.Subject)))
 	b.WriteString(m.replyBody.View() + "\n")
 
 	if len(m.replyAttachments) > 0 {
 		b.WriteString("\nAttachments:\n")
 		for i, f := range m.replyAttachments {
-			b.WriteString(fmt.Sprintf("  [%d] %s\n", i+1, filepath.Base(f)))
+			fmt.Fprintf(&b, "  [%d] %s\n", i+1, displayLine(filepath.Base(f)))
 		}
 	}
 

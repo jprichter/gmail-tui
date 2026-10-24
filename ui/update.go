@@ -56,7 +56,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			vpHeight = 1
 		}
 		m.viewport.Height = vpHeight
-		m.viewport.SetContent(msg.email.Body)
+		m.viewport.SetContent(displayText(msg.email.Body))
 		m.viewport.GotoTop()
 		return m, nil
 
@@ -102,7 +102,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case searchResultMsg:
 		m.emailList.SetItems(emailsToItems(msg.emails))
 		if msg.title != "" {
-			m.emailList.Title = msg.title
+			m.emailList.Title = displayLine(msg.title)
 		}
 		// Results replace the inbox listing; inbox page tokens no longer apply.
 		m.pageToken = ""
@@ -168,6 +168,14 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if (m.state == stateInbox || m.state == stateViewing) &&
+		(m.confirmDelete || key.Matches(msg, keys.Delete) || key.Matches(msg, keys.Archive) || key.Matches(msg, keys.ToggleRead)) && !m.client.HasModifyScope() {
+		m.confirmDelete = false
+		return m, notify("Mailbox modification disabled: grant does not permit writes or read-only mode is enabled")
+	}
+	if (m.state == stateComposing || m.state == stateReplying) && key.Matches(msg, keys.Send) && !m.client.HasSendScope() {
+		return m, notify("Sending disabled: grant does not permit sending or read-only mode is enabled")
+	}
 	if !m.showHelp && key.Matches(msg, keys.ShowHelp) {
 		m.showHelp = true
 		return m, nil
@@ -212,7 +220,7 @@ func (m Model) updateInbox(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Compose):
 		if !m.client.HasSendScope() {
-			return m, notify("Compose disabled: Gmail send scope not granted")
+			return m, notify("Compose disabled: grant does not permit sending or read-only mode is enabled")
 		}
 		m.state = stateComposing
 		m.isReply = false
@@ -300,7 +308,7 @@ func (m Model) updateViewing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Reply):
 		if !m.client.HasSendScope() {
-			return m, notify("Reply disabled: Gmail send scope not granted")
+			return m, notify("Reply disabled: grant does not permit sending or read-only mode is enabled")
 		}
 		m.state = stateReplying
 		m.replyTo = m.currentEmail
@@ -498,12 +506,12 @@ func (m Model) updateReplying(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateSearching(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case msg.Type == tea.KeyEsc:
+	switch msg.Type {
+	case tea.KeyEsc:
 		m.state = stateInbox
 		return m, nil
 
-	case msg.Type == tea.KeyEnter:
+	case tea.KeyEnter:
 		q := strings.TrimSpace(m.searchInput.Value())
 		if q == "" {
 			return m, nil

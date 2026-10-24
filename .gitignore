@@ -10,3 +10,16 @@ bin/
 .exe
 credentials.json
 .claude/
+
+.gmail-tui-token*
+.loop/*
+!.loop/prompts/
+.loop-worktrees/
+app.log
+
+# Generated coverage reports and local working directories
+/coverage.html
+/coverage.out
+/coverage_api.out
+/.tmp/
+/downloads/

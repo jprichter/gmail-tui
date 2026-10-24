@@ -363,6 +363,8 @@ func (m *MockClient) CacheSize() int {
 	return m.cacheSize
 }
 
+func (m *MockClient) HasModifyScope() bool { return true }
+
 func (m *MockClient) HasSendScope() bool {
 	return m.hasSendScope
 }

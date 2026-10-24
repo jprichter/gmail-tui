@@ -1,23 +1,40 @@
+version: "2"
 run:
   timeout: 5m
   tests: true
-
 linters:
   enable:
     - errcheck
     - govet
     - staticcheck
+    - unused
     - gosec
+    - misspell
+    - revive
+  settings:
+    revive:
+      severity: warning
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
     - gofmt
     - goimports
-    - misspell
-    - unused
-    - revive
-
-issues:
-  max-same-issues: 0
-  max-issues-per-linter: 0
-
-linters-settings:
-  revive:
-    severity: warning
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
