@@ -176,7 +176,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if (m.state == stateComposing || m.state == stateReplying) && key.Matches(msg, keys.Send) && !m.client.HasSendScope() {
 		return m, notify("Sending disabled: grant does not permit sending or read-only mode is enabled")
 	}
-	if !m.showHelp && key.Matches(msg, keys.ShowHelp) {
+	if !m.showHelp && m.state != stateComposing && m.state != stateReplying && m.state != stateSearching && key.Matches(msg, keys.ShowHelp) {
 		m.showHelp = true
 		return m, nil
 	}

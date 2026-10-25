@@ -10,6 +10,98 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func TestUpdateQuestionMarkReachesTextInputs(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name  string
+		state viewState
+		setup func(*Model)
+		value func(Model) string
+	}{
+		{
+			name: "compose body", state: stateComposing,
+			setup: func(m *Model) {
+				m.compose.focused = 5
+				m.compose.focusField()
+			},
+			value: func(m Model) string { return m.compose.body.Value() },
+		},
+		{
+			name: "compose subject", state: stateComposing,
+			setup: func(m *Model) {
+				m.compose.focused = 4
+				m.compose.focusField()
+			},
+			value: func(m Model) string { return m.compose.subject.Value() },
+		},
+		{
+			name: "reply body", state: stateReplying,
+			setup: func(m *Model) { m.replyBody.Focus() },
+			value: func(m Model) string { return m.replyBody.Value() },
+		},
+		{
+			name: "search text", state: stateSearching,
+			setup: func(m *Model) { m.searchInput.Focus() },
+			value: func(m Model) string { return m.searchInput.Value() },
+		},
+		{
+			name: "compose attachment path", state: stateComposing,
+			setup: func(m *Model) {
+				m.compose.addingAttach = true
+				m.compose.attachInput.Focus()
+			},
+			value: func(m Model) string { return m.compose.attachInput.Value() },
+		},
+		{
+			name: "reply attachment path", state: stateReplying,
+			setup: func(m *Model) {
+				m.addingAttach = true
+				m.attachInput.Focus()
+			},
+			value: func(m Model) string { return m.attachInput.Value() },
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			model := newTestModel(&MockClient{hasSendScope: true})
+			model.state = tt.state
+			tt.setup(&model)
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+			next := updated.(Model)
+			if next.showHelp || next.state != tt.state {
+				t.Fatalf("showHelp = %v, state = %v; want false, %v", next.showHelp, next.state, tt.state)
+			}
+			if got := tt.value(next); got != "?" {
+				t.Fatalf("input = %q, want ?", got)
+			}
+
+			next.showHelp = true
+			updated, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+			closed := updated.(Model)
+			if closed.showHelp || tt.value(closed) != "?" || closed.state != tt.state {
+				t.Fatal("closing help should preserve the input and state")
+			}
+		})
+	}
+}
+
+func TestUpdateQuestionMarkTogglesHelpInNavigationStates(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []viewState{stateLoading, stateInbox, stateViewing, stateLabels} {
+		model := newTestModel(&MockClient{})
+		model.state = state
+		for _, wantHelp := range []bool{true, false} {
+			updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+			model = updated.(Model)
+			if model.showHelp != wantHelp || model.state != state || cmd != nil {
+				t.Fatalf("state %v: showHelp = %v, state = %v, cmd nil = %v; want %v, %v, true", state, model.showHelp, model.state, cmd == nil, wantHelp, state)
+			}
+		}
+	}
+}
+
 func TestUpdateErrMsgTransitionsToInbox(t *testing.T) {
 	t.Parallel()
 
