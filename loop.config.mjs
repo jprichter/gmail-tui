@@ -3,7 +3,7 @@ export default {
   branchPrefix: 'feat/',
   remote: 'origin',
   engines: {
-    default: { name: 'codex', model: 'gpt-6.1-sol', effort: 'medium' },
+    default: { name: 'codex', model: 'gpt-6.2-sol', effort: 'medium' },
     review: { name: 'codex', model: 'gpt-6-luna', effort: 'high' },
     docs: { name: 'claude', model: 'claude-haiku-5-5', effort: 'high' },
     'pr-description': { name: 'claude', model: 'claude-haiku-5-5', effort: 'high' },
